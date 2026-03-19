@@ -28,6 +28,20 @@ try:
 except ImportError:
     HAS_OPENAI = False
 
+# pdfplumber for PDF table extraction (fallback)
+try:
+    import pdfplumber
+    HAS_PDFPLUMBER = True
+except ImportError:
+    HAS_PDFPLUMBER = False
+
+# tabula-py for PDF table extraction (fallback)
+try:
+    import tabula
+    HAS_TABULA = True
+except ImportError:
+    HAS_TABULA = False
+
 # PyMuPDF for PDF to image conversion (no Poppler needed)
 try:
     import fitz  # PyMuPDF
@@ -221,6 +235,87 @@ Return ONLY the JSON object, no other text or explanation."""
 
         return all_data
 
+    def _extract_pdf_with_pdfplumber(self, file_path_or_buffer) -> pd.DataFrame:
+        """Extract tables from PDF using pdfplumber (no API key needed)."""
+        if not HAS_PDFPLUMBER:
+            raise ValueError("pdfplumber not installed. Run: pip install pdfplumber")
+        
+        # Save buffer to temp file if needed
+        if hasattr(file_path_or_buffer, 'read'):
+            file_path_or_buffer.seek(0)
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
+                tmp.write(file_path_or_buffer.read())
+                tmp_path = tmp.name
+            use_temp = True
+        else:
+            tmp_path = file_path_or_buffer
+            use_temp = False
+        
+        try:
+            all_rows = []
+            headers = None
+            
+            with pdfplumber.open(tmp_path) as pdf:
+                for page_num, page in enumerate(pdf.pages, 1):
+                    tables = page.extract_tables()
+                    
+                    for table in tables:
+                        if not table or len(table) < 2:
+                            continue
+                        
+                        # First row is likely headers
+                        if headers is None:
+                            headers = [str(h).strip() if h else f"Column_{i}" for i, h in enumerate(table[0])]
+                        
+                        # Add data rows
+                        for row in table[1:]:
+                            if row and any(cell for cell in row):  # Skip empty rows
+                                all_rows.append([str(cell).strip() if cell else '' for cell in row])
+            
+            if not all_rows:
+                raise ValueError("No tables found in PDF")
+            
+            # Create DataFrame
+            df = pd.DataFrame(all_rows, columns=headers if headers else None)
+            logger.info(f"pdfplumber extracted {len(df)} rows, {len(df.columns)} columns")
+            return df
+            
+        finally:
+            if use_temp and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+    
+    def _extract_pdf_with_tabula(self, file_path_or_buffer) -> pd.DataFrame:
+        """Extract tables from PDF using tabula-py (no API key needed)."""
+        if not HAS_TABULA:
+            raise ValueError("tabula-py not installed. Run: pip install tabula-py")
+        
+        # Save buffer to temp file if needed
+        if hasattr(file_path_or_buffer, 'read'):
+            file_path_or_buffer.seek(0)
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp:
+                tmp.write(file_path_or_buffer.read())
+                tmp_path = tmp.name
+            use_temp = True
+        else:
+            tmp_path = file_path_or_buffer
+            use_temp = False
+        
+        try:
+            # Extract all tables from all pages
+            dfs = tabula.read_pdf(tmp_path, pages='all', multiple_tables=True)
+            
+            if not dfs:
+                raise ValueError("No tables found in PDF")
+            
+            # Combine all tables
+            combined = pd.concat(dfs, ignore_index=True)
+            logger.info(f"tabula extracted {len(combined)} rows, {len(combined.columns)} columns")
+            return combined
+            
+        finally:
+            if use_temp and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
     def _combine_extracted_data(self, all_data: list) -> pd.DataFrame:
         """Combine extracted data from multiple pages/images into a single DataFrame."""
         if not all_data:
@@ -310,18 +405,36 @@ Return ONLY the JSON object, no other text or explanation."""
         return base64.b64encode(img_bytes).decode('utf-8')
 
     def _extract_pdf_tables(self, file_path_or_buffer) -> pd.DataFrame:
-        """Extract tables from PDF using OpenAI GPT-4o-mini Vision API via PyMuPDF."""
-        logger.info("Extracting PDF data using OpenAI GPT-4o-mini + PyMuPDF...")
-
-        # Convert PDF pages to images
-        base64_images = self._pdf_to_base64_images(file_path_or_buffer)
-        page_labels = [f"PDF Page {i+1}" for i in range(len(base64_images))]
-
-        # Send to OpenAI for extraction
-        all_data = self._call_openai_vision(base64_images, page_labels)
-
-        # Combine all pages
-        return self._combine_extracted_data(all_data)
+        """Extract tables from PDF using available methods (pdfplumber, tabula, or OpenAI)."""
+        
+        # Try pdfplumber first (no API key needed)
+        if HAS_PDFPLUMBER:
+            try:
+                logger.info("Extracting PDF data using pdfplumber...")
+                return self._extract_pdf_with_pdfplumber(file_path_or_buffer)
+            except Exception as e:
+                logger.warning(f"pdfplumber extraction failed: {e}")
+        
+        # Try tabula as fallback
+        if HAS_TABULA:
+            try:
+                logger.info("Extracting PDF data using tabula-py...")
+                return self._extract_pdf_with_tabula(file_path_or_buffer)
+            except Exception as e:
+                logger.warning(f"tabula extraction failed: {e}")
+        
+        # Try OpenAI as last resort (requires API key)
+        if HAS_OPENAI and OPENAI_API_KEY:
+            try:
+                logger.info("Extracting PDF data using OpenAI GPT-4o-mini + PyMuPDF...")
+                base64_images = self._pdf_to_base64_images(file_path_or_buffer)
+                page_labels = [f"PDF Page {i+1}" for i in range(len(base64_images))]
+                all_data = self._call_openai_vision(base64_images, page_labels)
+                return self._combine_extracted_data(all_data)
+            except Exception as e:
+                logger.error(f"OpenAI extraction failed: {e}")
+        
+        raise ValueError("No PDF extraction method available. Install pdfplumber or tabula-py, or configure OpenAI API key.")
 
     def _extract_image_tables(self, file_path_or_buffer) -> pd.DataFrame:
         """Extract tables from image files (JPG, JPEG, PNG, etc.) using OpenAI GPT-4o-mini."""
