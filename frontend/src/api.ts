@@ -13,6 +13,22 @@ import type {
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 const api = axios.create({ baseURL: API_BASE });
 
+// User ID for credit tracking - set after login
+let currentUserId: number | null = null;
+
+export function setCurrentUserId(userId: number | null) {
+  currentUserId = userId;
+  if (userId) {
+    api.defaults.headers.common['X-User-Id'] = userId.toString();
+  } else {
+    delete api.defaults.headers.common['X-User-Id'];
+  }
+}
+
+export function getCurrentUserId(): number | null {
+  return currentUserId;
+}
+
 export async function uploadFiles(fileA: File, fileB: File): Promise<UploadResponse> {
   const form = new FormData();
   form.append('file_a', fileA);

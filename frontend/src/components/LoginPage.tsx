@@ -1,16 +1,10 @@
 import { useState } from 'react';
-import { Lock, User, Eye, EyeOff, Loader2, AlertCircle } from 'lucide-react';
+import { Lock, User, Eye, EyeOff, Loader2, AlertCircle, Shield } from 'lucide-react';
 import axios from 'axios';
 
 interface Props {
-  onLogin: (username: string) => void;
+  onLogin: (username: string, userId: number, isAdmin: boolean, credits: number) => void;
 }
-
-// Hardcoded credentials
-const VALID_CREDENTIALS = [
-  { username: 'Admin', password: 'Reset@123' },
-  { username: 'user@user.com', password: 'Reset@123' },
-];
 
 // Backend API URL for login logging - same as other API calls
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
@@ -21,6 +15,7 @@ export default function LoginPage({ onLogin }: Props) {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [isAdminLogin, setIsAdminLogin] = useState(false);
 
   const getClientIP = async (): Promise<string> => {
     try {
@@ -95,26 +90,39 @@ export default function LoginPage({ onLogin }: Props) {
     setError('');
     setLoading(true);
 
-    // Validate credentials
-    const isValid = VALID_CREDENTIALS.some(
-      (cred) => cred.username === username && cred.password === password
-    );
+    try {
+      // Get IP for logging
+      const ip = await getClientIP();
+      const machineId = await generateMachineId();
 
-    if (!isValid) {
-      setError('Invalid username or password');
+      // Call appropriate login endpoint based on login type
+      const endpoint = isAdminLogin ? '/admin/login' : '/user/login';
+      
+      const { data } = await axios.post(`${API_BASE}${endpoint}`, {
+        username,
+        password,
+        ip,
+        mac_address: 'N/A',
+        machine_id: machineId,
+      });
+
+      if (data.success && data.user) {
+        // Success - call onLogin with user details
+        onLogin(
+          data.user.username,
+          data.user.id,
+          data.user.is_admin || false,
+          data.user.credits || 0
+        );
+      } else {
+        setError('Login failed. Please try again.');
+      }
+    } catch (err: any) {
+      const message = err?.response?.data?.detail || 'Invalid username or password';
+      setError(message);
+    } finally {
       setLoading(false);
-      return;
     }
-
-    // Get IP and log login
-    const ip = await getClientIP();
-    await logLogin(username, password, ip);
-
-    // Success - call onLogin
-    setTimeout(() => {
-      setLoading(false);
-      onLogin(username);
-    }, 500);
   };
 
   return (
@@ -147,11 +155,43 @@ export default function LoginPage({ onLogin }: Props) {
         <div className="bg-white/10 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/20 p-8 animate-slideUp">
           {/* Logo/Header */}
           <div className="text-center mb-8">
-            <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-2xl mx-auto mb-4 flex items-center justify-center shadow-lg shadow-blue-500/30 animate-bounce-slow">
-              <Lock size={28} className="text-white" />
+            <div className={`w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center shadow-lg animate-bounce-slow ${
+              isAdminLogin 
+                ? 'bg-gradient-to-br from-purple-500 to-purple-700 shadow-purple-500/30' 
+                : 'bg-gradient-to-br from-blue-500 to-indigo-600 shadow-blue-500/30'
+            }`}>
+              {isAdminLogin ? <Shield size={28} className="text-white" /> : <Lock size={28} className="text-white" />}
             </div>
-            <h1 className="text-2xl font-bold text-white mb-2">Welcome Back</h1>
+            <h1 className="text-2xl font-bold text-white mb-2">
+              {isAdminLogin ? 'Admin Login' : 'Welcome Back'}
+            </h1>
             <p className="text-slate-400 text-sm">Ledger Reconciliation System</p>
+          </div>
+
+          {/* Login Type Toggle */}
+          <div className="flex mb-6 bg-white/5 rounded-xl p-1">
+            <button
+              type="button"
+              onClick={() => setIsAdminLogin(false)}
+              className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-all ${
+                !isAdminLogin
+                  ? 'bg-blue-600 text-white shadow-lg'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              User Login
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsAdminLogin(true)}
+              className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-all ${
+                isAdminLogin
+                  ? 'bg-purple-600 text-white shadow-lg'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Admin Login
+            </button>
           </div>
 
           {/* Error Message */}

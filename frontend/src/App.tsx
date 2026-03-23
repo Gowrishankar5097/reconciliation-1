@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { RotateCcw, Loader2, X, AlertCircle, CheckCircle2, LogOut } from 'lucide-react';
+import { RotateCcw, Loader2, X, AlertCircle, CheckCircle2, LogOut, BarChart3, CreditCard } from 'lucide-react';
 import Stepper from './components/Stepper';
 import UploadScreen from './components/UploadScreen';
 import DataPreview from './components/DataPreview';
@@ -7,7 +7,9 @@ import ResultsDashboard from './components/ResultsDashboard';
 import MatchDetails from './components/MatchDetails';
 import Exceptions from './components/Exceptions';
 import LoginPage from './components/LoginPage';
-import { reconcile, resetAll } from './api';
+import AdminDashboard from './components/AdminDashboard';
+import UserDashboard from './components/UserDashboard';
+import { reconcile, resetAll, setCurrentUserId } from './api';
 import type { UploadResponse, FileInfo as FileInfoType } from './types';
 
 // ── Toast notification ───────────────────────────────────────
@@ -45,6 +47,10 @@ function validateFile(file: File): string | null {
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [loggedInUser, setLoggedInUser] = useState('');
+  const [userId, setUserId] = useState<number>(0);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [userCredits, setUserCredits] = useState(0);
+  const [showUserDashboard, setShowUserDashboard] = useState(false);
   const [step, setStep] = useState(0);
   const [hasData, setHasData] = useState(false);
   const [hasResults, setHasResults] = useState(false);
@@ -59,14 +65,25 @@ export default function App() {
   const [companyNameA, setCompanyNameA] = useState('');
   const [companyNameB, setCompanyNameB] = useState('');
 
-  const handleLogin = useCallback((username: string) => {
+  const handleLogin = useCallback((username: string, id: number, admin: boolean, credits: number) => {
     setIsLoggedIn(true);
     setLoggedInUser(username);
+    setUserId(id);
+    setIsAdmin(admin);
+    setUserCredits(credits);
+    // Set user ID for API credit tracking
+    setCurrentUserId(id);
   }, []);
 
   const handleLogout = useCallback(() => {
     setIsLoggedIn(false);
     setLoggedInUser('');
+    setUserId(0);
+    setIsAdmin(false);
+    setUserCredits(0);
+    setShowUserDashboard(false);
+    // Clear user ID for API
+    setCurrentUserId(null);
     // Reset all state
     setStep(0);
     setHasData(false);
@@ -162,10 +179,29 @@ export default function App() {
     return <LoginPage onLogin={handleLogin} />;
   }
 
+  // Show Admin Dashboard for admin users
+  if (isAdmin) {
+    return (
+      <AdminDashboard
+        adminUser={{ id: userId, username: loggedInUser }}
+        onLogout={handleLogout}
+      />
+    );
+  }
+
   return (
     <div className="h-screen w-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col overflow-hidden">
       {/* Toast notifications */}
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+
+      {/* User Dashboard Modal */}
+      {showUserDashboard && (
+        <UserDashboard
+          userId={userId}
+          username={loggedInUser}
+          onClose={() => setShowUserDashboard(false)}
+        />
+      )}
 
       {/* Header with stepper inline */}
       <header className="bg-gradient-to-r from-navy-900 via-navy-800 to-navy-900 text-white px-5 py-2.5 flex items-center shadow-xl shrink-0 border-b border-navy-700/50">
@@ -187,6 +223,15 @@ export default function App() {
 
         {/* Right — User info & Actions */}
         <div className="flex items-center gap-3 shrink-0">
+          {/* Credits Display */}
+          <button
+            onClick={() => setShowUserDashboard(true)}
+            className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 rounded-lg text-xs font-medium transition-all text-emerald-300"
+            title="View Dashboard"
+          >
+            <CreditCard size={13} />
+            <span>{userCredits} credits</span>
+          </button>
           <span className="text-xs text-navy-300">{loggedInUser}</span>
           <button
             onClick={handleReset}
