@@ -695,7 +695,7 @@ class DataNormalizer:
         # Check if next column is unnamed/nan (indicating a merged header)
         if part_idx + 1 < len(cols):
             next_col = str(cols[part_idx + 1]).strip().lower()
-            if 'unnamed' in next_col or next_col == 'nan':
+            if 'unnamed' in str(next_col) or next_col == 'nan':
                 part_col = cols[part_idx]
                 desc_col = cols[part_idx + 1]
                 # Merge: "To" + "HDFC-CC A/C" → "To HDFC-CC A/C"
@@ -723,14 +723,15 @@ class DataNormalizer:
         best_score = 0
 
         for i in range(max_scan):
-            row_values = raw_df.iloc[i].astype(str).str.strip().str.lower().tolist()
+            row_values = [str(x).strip().lower() for x in raw_df.iloc[i].tolist()]
             score = 0
             non_empty = 0
             for val in row_values:
+                val = str(val)  # Ensure it's a string
                 if val and val != 'nan' and val != 'none':
                     non_empty += 1
                     for kw in self._HEADER_KEYWORDS:
-                        if kw in val:
+                        if kw in str(val):
                             score += 1
                             break
             # A good header row has multiple keyword hits AND multiple non-empty cells
