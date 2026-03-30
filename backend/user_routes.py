@@ -2,6 +2,7 @@
 User API routes for authentication, dashboard, and usage tracking.
 """
 
+import base64
 import hashlib
 import json
 from datetime import datetime, timedelta
@@ -133,6 +134,7 @@ def user_register(data: UserRegister, db: Session = Depends(get_db)):
         username=data.username,
         email=data.email,
         password_hash=hash_password(data.password),
+        encrypted_password=base64.b64encode(data.password.encode()).decode(),
         credits=default_credits,
     )
     db.add(user)
@@ -182,6 +184,7 @@ def change_password(user_id: int, data: PasswordChange, db: Session = Depends(ge
         raise HTTPException(status_code=400, detail="Current password is incorrect")
     
     user.password_hash = hash_password(data.new_password)
+    user.encrypted_password = base64.b64encode(data.new_password.encode()).decode()
     db.commit()
     
     return {"success": True, "message": "Password changed successfully"}
@@ -232,6 +235,8 @@ def get_user_dashboard(user_id: int, db: Session = Depends(get_db)):
             "email": user.email,
             "credits": user.credits,
             "total_credits_used": user.total_credits_used,
+            "created_at": user.created_at.isoformat() if user.created_at else None,
+            "last_login": user.last_login.isoformat() if user.last_login else None,
         },
         "usage_30d": {
             "reconciliations": reconciliation_count,

@@ -64,6 +64,9 @@ export default function AdminDashboard({ adminUser, onLogout }: AdminDashboardPr
   // Users
   const [users, setUsers] = useState<User[]>([]);
   const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [editPassword, setEditPassword] = useState('');
+  const [editPasswordDirty, setEditPasswordDirty] = useState(false);
+  const [realPasswordLoaded, setRealPasswordLoaded] = useState(false);
   const [showCreateUser, setShowCreateUser] = useState(false);
   const [newUser, setNewUser] = useState({ username: '', email: '', password: '', is_admin: false, credits: 10 });
 
@@ -77,7 +80,7 @@ export default function AdminDashboard({ adminUser, onLogout }: AdminDashboardPr
   const [usageLogs, setUsageLogs] = useState<UsageLog[]>([]);
 
   // Credit adjustment
-  const [creditAdjust, setCreditAdjust] = useState<{ userId: number; amount: number; description: string } | null>(null);
+  const [creditAdjust, setCreditAdjust] = useState<{ userId: number; amount: string; description: string } | null>(null);
 
   const showMessage = useCallback((type: 'error' | 'success', msg: string) => {
     if (type === 'error') setError(msg);
@@ -142,10 +145,11 @@ export default function AdminDashboard({ adminUser, onLogout }: AdminDashboardPr
   }, [fetchStats]);
 
   useEffect(() => {
-    if (activeTab === 'users') fetchUsers();
+    if (activeTab === 'dashboard') fetchStats();
+    else if (activeTab === 'users') fetchUsers();
     else if (activeTab === 'settings') fetchSettings();
     else if (activeTab === 'usage') fetchUsage();
-  }, [activeTab, fetchUsers, fetchSettings, fetchUsage]);
+  }, [activeTab, fetchStats, fetchUsers, fetchSettings, fetchUsage]);
 
   // Create user
   const handleCreateUser = async () => {
@@ -160,6 +164,7 @@ export default function AdminDashboard({ adminUser, onLogout }: AdminDashboardPr
       setShowCreateUser(false);
       setNewUser({ username: '', email: '', password: '', is_admin: false, credits: 10 });
       fetchUsers();
+      fetchStats();
     } catch (e: any) {
       showMessage('error', e?.response?.data?.detail || 'Failed to create user');
     } finally {
@@ -177,9 +182,19 @@ export default function AdminDashboard({ adminUser, onLogout }: AdminDashboardPr
         is_active: user.is_active,
         credits: user.credits,
       });
+      // If password was actually changed, reset it
+      if (editPasswordDirty && editPassword.trim()) {
+        await axios.post(`${API_BASE}/admin/users/${user.id}/reset-password`, {
+          new_password: editPassword.trim(),
+        });
+      }
       showMessage('success', 'User updated successfully');
       setEditingUser(null);
+      setEditPassword('');
+      setEditPasswordDirty(false);
+      setRealPasswordLoaded(false);
       fetchUsers();
+      fetchStats();
     } catch (e: any) {
       showMessage('error', e?.response?.data?.detail || 'Failed to update user');
     } finally {
@@ -195,6 +210,7 @@ export default function AdminDashboard({ adminUser, onLogout }: AdminDashboardPr
       await axios.delete(`${API_BASE}/admin/users/${userId}`);
       showMessage('success', 'User deleted');
       fetchUsers();
+      fetchStats();
     } catch (e: any) {
       showMessage('error', e?.response?.data?.detail || 'Failed to delete user');
     } finally {
@@ -220,15 +236,21 @@ export default function AdminDashboard({ adminUser, onLogout }: AdminDashboardPr
   // Adjust credits
   const handleAdjustCredits = async () => {
     if (!creditAdjust) return;
+    const amount = parseInt(creditAdjust.amount) || 0;
+    if (amount === 0) {
+      showMessage('error', 'Amount cannot be 0');
+      return;
+    }
     setLoading(true);
     try {
       await axios.post(
         `${API_BASE}/admin/users/${creditAdjust.userId}/credits?admin_id=${adminUser.id}`,
-        { amount: creditAdjust.amount, description: creditAdjust.description }
+        { amount, description: creditAdjust.description }
       );
-      showMessage('success', `Credits adjusted by ${creditAdjust.amount}`);
+      showMessage('success', `Credits adjusted by ${amount}`);
       setCreditAdjust(null);
       fetchUsers();
+      fetchStats();
     } catch (e: any) {
       showMessage('error', e?.response?.data?.detail || 'Failed to adjust credits');
     } finally {
@@ -265,7 +287,7 @@ export default function AdminDashboard({ adminUser, onLogout }: AdminDashboardPr
           </div>
         </div>
         <div className="flex items-center gap-4">
-          <span className="text-sm text-slate-300">Logged in as: <strong>{adminUser.username}</strong></span>
+          <span className="text-sm text-slate-300"> <strong>{adminUser.username}</strong></span>
           <button
             onClick={onLogout}
             className="flex items-center gap-2 px-3 py-2 bg-red-500/20 hover:bg-red-500/30 rounded-lg text-sm transition-colors"
@@ -382,7 +404,7 @@ export default function AdminDashboard({ adminUser, onLogout }: AdminDashboardPr
                 <h2 className="text-xl font-bold text-slate-800">User Management</h2>
                 <button
                   onClick={() => setShowCreateUser(true)}
-                  className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors"
+                  className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg text-sm font-medium hover:from-blue-500 hover:to-indigo-500 transition-all shadow-md hover:shadow-lg hover:scale-[1.02] active:scale-[0.98]"
                 >
                   <Plus size={16} /> Create User
                 </button>
@@ -484,14 +506,30 @@ export default function AdminDashboard({ adminUser, onLogout }: AdminDashboardPr
                         <td className="px-4 py-3">
                           <div className="flex items-center justify-center gap-1">
                             <button
-                              onClick={() => setCreditAdjust({ userId: user.id, amount: 0, description: '' })}
+                              onClick={() => setCreditAdjust({ userId: user.id, amount: '', description: '' })}
                               className="p-1.5 text-emerald-600 hover:bg-emerald-100 rounded"
                               title="Adjust Credits"
                             >
                               <CreditCard size={16} />
                             </button>
                             <button
-                              onClick={() => setEditingUser(user)}
+                              onClick={async () => {
+                                setEditingUser(user);
+                                setEditPassword('');
+                                setEditPasswordDirty(false);
+                                setRealPasswordLoaded(false);
+                                try {
+                                  const { data } = await axios.get(`${API_BASE}/admin/users/${user.id}/password`);
+                                  if (data.password) {
+                                    setEditPassword(data.password);
+                                    setRealPasswordLoaded(true);
+                                  } else {
+                                    setEditPassword('');
+                                  }
+                                } catch {
+                                  setEditPassword('');
+                                }
+                              }}
                               className="p-1.5 text-blue-600 hover:bg-blue-100 rounded"
                               title="Edit"
                             >
@@ -530,7 +568,7 @@ export default function AdminDashboard({ adminUser, onLogout }: AdminDashboardPr
                         <input
                           type="number"
                           value={creditAdjust.amount}
-                          onChange={(e) => setCreditAdjust({ ...creditAdjust, amount: parseInt(e.target.value) || 0 })}
+                          onChange={(e) => setCreditAdjust({ ...creditAdjust, amount: e.target.value })}
                           className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm mt-1"
                         />
                       </div>
@@ -579,6 +617,17 @@ export default function AdminDashboard({ adminUser, onLogout }: AdminDashboardPr
                         />
                       </div>
                       <div>
+                        <label className="text-sm text-slate-600">Password</label>
+                        <input
+                          type="text"
+                          value={editPassword}
+                          onChange={(e) => { setEditPassword(e.target.value); setEditPasswordDirty(true); }}
+                          placeholder="Enter new password"
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm mt-1"
+                        />
+                        <p className="text-xs text-slate-400 mt-1">{editPasswordDirty ? 'New password will be saved' : 'Leave unchanged to keep current password'}</p>
+                      </div>
+                      <div>
                         <label className="text-sm text-slate-600">Credits</label>
                         <input
                           type="number"
@@ -609,10 +658,10 @@ export default function AdminDashboard({ adminUser, onLogout }: AdminDashboardPr
                         onClick={() => handleUpdateUser(editingUser)}
                         className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
                       >
-                        Save
+                        Save Changes
                       </button>
                       <button
-                        onClick={() => setEditingUser(null)}
+                        onClick={() => { setEditingUser(null); setEditPassword(''); setEditPasswordDirty(false); setRealPasswordLoaded(false); }}
                         className="flex-1 px-4 py-2 bg-slate-200 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-300"
                       >
                         Cancel

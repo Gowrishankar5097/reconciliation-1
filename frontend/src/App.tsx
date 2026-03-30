@@ -45,11 +45,11 @@ function validateFile(file: File): string | null {
 }
 
 export default function App() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [loggedInUser, setLoggedInUser] = useState('');
-  const [userId, setUserId] = useState<number>(0);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [userCredits, setUserCredits] = useState(0);
+  const [isLoggedIn, setIsLoggedIn] = useState(() => sessionStorage.getItem('isLoggedIn') === 'true');
+  const [loggedInUser, setLoggedInUser] = useState(() => sessionStorage.getItem('loggedInUser') || '');
+  const [userId, setUserId] = useState<number>(() => Number(sessionStorage.getItem('userId')) || 0);
+  const [isAdmin, setIsAdmin] = useState(() => sessionStorage.getItem('isAdmin') === 'true');
+  const [userCredits, setUserCredits] = useState(() => Number(sessionStorage.getItem('userCredits')) || 0);
   const [showUserDashboard, setShowUserDashboard] = useState(false);
   const [step, setStep] = useState(0);
   const [hasData, setHasData] = useState(false);
@@ -65,12 +65,26 @@ export default function App() {
   const [companyNameA, setCompanyNameA] = useState('');
   const [companyNameB, setCompanyNameB] = useState('');
 
+  // Restore API user ID on mount if session exists
+  useEffect(() => {
+    const storedUserId = Number(sessionStorage.getItem('userId')) || 0;
+    if (storedUserId) {
+      setCurrentUserId(storedUserId);
+    }
+  }, []);
+
   const handleLogin = useCallback((username: string, id: number, admin: boolean, credits: number) => {
     setIsLoggedIn(true);
     setLoggedInUser(username);
     setUserId(id);
     setIsAdmin(admin);
     setUserCredits(credits);
+    // Persist session
+    sessionStorage.setItem('isLoggedIn', 'true');
+    sessionStorage.setItem('loggedInUser', username);
+    sessionStorage.setItem('userId', id.toString());
+    sessionStorage.setItem('isAdmin', admin.toString());
+    sessionStorage.setItem('userCredits', credits.toString());
     // Set user ID for API credit tracking
     setCurrentUserId(id);
   }, []);
@@ -82,6 +96,8 @@ export default function App() {
     setIsAdmin(false);
     setUserCredits(0);
     setShowUserDashboard(false);
+    // Clear session storage
+    sessionStorage.clear();
     // Clear user ID for API
     setCurrentUserId(null);
     // Reset all state
@@ -223,6 +239,13 @@ export default function App() {
 
         {/* Right — User info & Actions */}
         <div className="flex items-center gap-3 shrink-0">
+          {/* User badge */}
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-white/10 rounded-lg">
+            <div className="w-6 h-6 rounded-full bg-blue-500/30 flex items-center justify-center">
+              <span className="text-[10px] font-bold text-blue-200 uppercase">{loggedInUser.charAt(0)}</span>
+            </div>
+            <span className="text-xs font-medium text-white">{loggedInUser}</span>
+          </div>
           {/* Credits Display */}
           <button
             onClick={() => setShowUserDashboard(true)}
@@ -232,7 +255,6 @@ export default function App() {
             <CreditCard size={13} />
             <span>{userCredits} credits</span>
           </button>
-          <span className="text-xs text-navy-300">{loggedInUser}</span>
           <button
             onClick={handleReset}
             className="flex items-center gap-2 px-3 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-xs font-medium transition-all duration-200 hover:scale-105 active:scale-95"

@@ -4,6 +4,7 @@ Uses MySQL database: Ledger_Reconsile
 """
 
 import os
+import base64
 from datetime import datetime
 from urllib.parse import quote_plus
 from dotenv import load_dotenv
@@ -48,6 +49,7 @@ class User(Base):
     username = Column(String(100), unique=True, index=True, nullable=False)
     email = Column(String(255), unique=True, index=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
+    encrypted_password = Column(String(500), nullable=True)  # Base64-encoded password for admin retrieval
     is_admin = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
     credits = Column(Integer, default=10)  # Default 10 credits for new users
@@ -123,6 +125,22 @@ def init_db():
     """Create all tables and initialize default settings."""
     Base.metadata.create_all(bind=engine)
     
+    # Migrate: add encrypted_password column if it doesn't exist
+    try:
+        with engine.connect() as conn:
+            from sqlalchemy import text, inspect
+            inspector = inspect(engine)
+            columns = [col['name'] for col in inspector.get_columns('users')]
+            if 'encrypted_password' not in columns:
+                if 'sqlite' in DATABASE_URL:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN encrypted_password VARCHAR(500)"))
+                else:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN encrypted_password VARCHAR(500) NULL"))
+                conn.commit()
+                print("Migration: Added encrypted_password column to users table")
+    except Exception as e:
+        print(f"Migration check (encrypted_password): {e}")
+    
     db = SessionLocal()
     try:
         # Check if admin user exists
@@ -135,6 +153,7 @@ def init_db():
                 username="admin",
                 email="admin@ledgerreconcile.com",
                 password_hash=password_hash,
+                encrypted_password=base64.b64encode("admin123".encode()).decode(),
                 is_admin=True,
                 credits=999999,
             )

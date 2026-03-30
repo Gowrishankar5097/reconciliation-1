@@ -2,6 +2,7 @@
 Admin API routes for user management, settings, and usage tracking.
 """
 
+import base64
 import hashlib
 import json
 from datetime import datetime, timedelta
@@ -175,6 +176,7 @@ def create_user(user_data: UserCreate, db: Session = Depends(get_db)):
         username=user_data.username,
         email=user_data.email,
         password_hash=hash_password(user_data.password),
+        encrypted_password=base64.b64encode(user_data.password.encode()).decode(),
         is_admin=user_data.is_admin,
         credits=user_data.credits,
     )
@@ -207,13 +209,18 @@ def update_user(user_id: int, user_data: UserUpdate, db: Session = Depends(get_d
 
 @router.delete("/users/{user_id}")
 def delete_user(user_id: int, db: Session = Depends(get_db)):
-    """Delete a user."""
+    """Delete a user and all related records."""
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
     if user.username == "admin":
         raise HTTPException(status_code=400, detail="Cannot delete default admin user")
+    
+    # Delete related records to avoid foreign key constraints
+    db.query(UsageLog).filter(UsageLog.user_id == user_id).delete()
+    db.query(CreditTransaction).filter(CreditTransaction.user_id == user_id).delete()
+    db.query(LoginLog).filter(LoginLog.user_id == user_id).delete()
     
     db.delete(user)
     db.commit()
@@ -228,8 +235,25 @@ def reset_password(user_id: int, data: PasswordReset, db: Session = Depends(get_
         raise HTTPException(status_code=404, detail="User not found")
     
     user.password_hash = hash_password(data.new_password)
+    user.encrypted_password = base64.b64encode(data.new_password.encode()).decode()
     db.commit()
     return {"success": True, "message": "Password reset successfully"}
+
+
+@router.get("/users/{user_id}/password")
+def get_user_password(user_id: int, db: Session = Depends(get_db)):
+    """Get user's actual password (admin only)."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user.encrypted_password:
+        try:
+            password = base64.b64decode(user.encrypted_password.encode()).decode()
+            return {"password": password}
+        except Exception:
+            return {"password": None, "message": "Unable to decrypt password"}
+    return {"password": None, "message": "No stored password available"}
 
 
 # ── Credit Management ───────────────────────────────────────────
